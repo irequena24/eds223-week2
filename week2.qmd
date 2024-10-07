@@ -1,0 +1,232 @@
+---
+title: "week2"
+format: html
+editor_options:
+  chunk_output_type: console
+---
+
+
+```{r}
+#clears all code
+rm(list=ls())
+```
+
+
+```{r}
+library(sf)
+library(tidyverse)
+library(spData)
+library(tmap)
+```
+
+```{r}
+# add a point. ST is SpatioTemporal, part of SF package though.
+
+london_point <- st_point(c(0.1, 51.5)) # in degrees of lat and long, but not CRS
+
+# SFC simple feature geom
+london_geom <- st_sfc(london_point, crs=4326)
+
+london_attrib <- data.frame(
+  name="London",
+  temperature = 25,
+  date = as.Date("2017-06-21")
+)
+
+
+london_sf <- st_sf(london_attrib, geometry=london_geom)
+
+#check class, to make sure its what youre expecting it to be. Which says its an object and a data frame.
+class(london_sf)
+
+# check CRF: huge mess.
+st_crs(london_sf)
+
+# check CRF: IsGeographic we know its geographic. 
+st_crs(london_sf)$IsGeographic
+```
+
+
+
+```{r}
+
+# this is world polygons
+world <- spData::world
+
+# check columns
+names(world)
+
+#stats of life expectancy (lifeExp)
+summary(world$lifeExp)
+```
+
+
+```{r}
+
+# Geometry column is very stick. Something that sf has done. We cant take it out.
+world_df <- world %>%
+  select(-geom)
+
+# Sticky even if we just keep the Continent column
+world_df <- world %>%
+  select(continent)
+
+# But we can drop it
+world_df <- st_drop_geometry(world)
+
+class(world_df)
+```
+
+### REPROJECTING DATA
+```{r}
+# Create another point, but with CRS (which is after the pipe operator). You will use st_as_sf when you have a CSV with long and lat columns, and you make it into a geometry. 
+
+london_proj <- data.frame(x=53000, y=180000) %>% 
+  st_as_sf(coords = c("x", "y"), crs="EPSG:27700")
+
+# lots of stuff to check
+st_crs(london_proj)
+
+# lots of stuff to check, instead we use this to check if the CRS matches both datasets
+st_crs(london_proj) == st_crs(london_sf)
+
+# we must transform the CRS of london_sf to that of london_proj. st_crs will match. This line will come up in the workflows all the time
+london_sf_transform <- st_transform(london_sf, crs=st_crs(london_proj))
+```
+
+
+
+```{r}
+# selfcheck to see if the above wored
+
+if(st_crs(london_sf_transform)==st_crs(london_proj)) {
+  print("coordinate reference systems of datasets match")
+} else {
+  warning("coordinate reference systems do not match")
+}
+
+```
+
+
+## Change map projections when plotting
+```{r}
+# MAKE THE MAP
+tm_shape(world, projection=8857)+
+  tm_fill(col="area_km2")
+```
+
+
+```{r}
+# now well change the projection. Antarctica is huge. 
+tm_shape(world, projection=3395)+
+  tm_fill(col="area_km2")
+```
+
+## Modify the table: vector attributes subsetting
+```{r}
+world %>% 
+  select(name_long, pop) #selects just name and population
+
+world %>% 
+  select(-subregion) #removes subregion
+
+world %>% 
+  select(name=name_long, population = pop) #renames columns
+```
+
+
+```{r}
+# We can filter
+
+world1 <- world %>% 
+  filter(area_km2<10000)
+```
+
+
+```{r}
+world %>% 
+  filter(continent == "Asia") %>% 
+  select(name_long, continent, lifeExp) %>% 
+  slice_max(lifeExp) %>% #picks the row with the max value, in this the country with highest lifeExp
+  st_drop_geometry()
+```
+
+
+```{r}
+# total pop by continent, by first adding up the values by countries. 
+
+world %>% 
+  group_by(continent) %>% 
+  summarise(population = sum(pop, na.rm=TRUE)) %>% 
+  st_drop_geometry()
+```
+
+# Joins with vector attributes
+```{r}
+# lets load in coffee data
+
+coffee_data <- spData::coffee_data
+
+# rows in both DF
+nrow(coffee_data) # 47 rows
+nrow(world) # 177 rows
+
+# left join both df by name of countries. There's many NAs bc not all countries have data. 
+world_coffee <- left_join(world, coffee_data, by="name_long")
+```
+
+```{r}
+# make a map, based on coffee production. 
+
+tm_shape(world_coffee)+
+  tm_fill(col="coffee_production_2017")
+```
+
+
+```{r}
+# keeps only producing countries
+world_coffee_inner <- inner_join(world, coffee_data, by = "name_long")
+
+# check if you lost data. 
+if(nrow(world_coffee_inner) < nrow(coffee_data)) {
+  warning("innner join does not match original data. Potential data loss during join")
+}
+```
+
+
+```{r}
+# this tells me "Congo, Dem. Rep. of" "Others"  are not in the world data. 
+setdiff(coffee_data$name_long, world$name_long)
+
+# For "other countries" we cant do anything. But for the Dem Rep of Congo we can. 
+```
+
+```{r}
+# so we are going to set up a system. First check the world data. Then change it in the coffee data.
+drc <- stringr::str_subset(world$name_long, "Dem*.+Congo") # looks for strings with these two pieces
+
+# change abbreviated name to full name.
+coffee_data$name_long[stringr::str_detect(coffee_data$name_long, "Congo")] <- drc
+
+# now run the inner join and test again from lines 186. Its still going to say "innner join does not match original data. Potential data loss during join " because of "Others"
+```
+
+
+```{r}
+# make the map 
+tm_shape(world_coffee_inner)+
+  tm_polygons(fill = "coffee_production_2017",
+              title = "Coffee Production (2017)")+
+  tm_layout(legend.outside = TRUE)
+```
+
+```{r}
+# last thing, remember if you do a left join using the coffee dataset, it will turn into a data frame.
+```
+
+
+
+
+
+
+
